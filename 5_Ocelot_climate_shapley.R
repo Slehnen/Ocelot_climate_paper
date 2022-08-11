@@ -13,14 +13,13 @@ library(BiodiversityR)
 library(ROCR)
 library(rgeos)
 library(enmSdm)
-library(ggplot2)
-library(ggthemes)
 library(sf)
 library(ggpubr)
 library(ggplot2)
 library(ggthemes)
-library(dplyr)
 library(forcats)
+library(fastshap)  # for fast (approximate) Shapley values
+library(ranger)    # for fast random forest algorithm
 
 set.seed(123)
 
@@ -51,13 +50,14 @@ aoi_plot <- ggplot(polys) +
   ylab("")
 aoi_plot
 
+## directory to current bioclim layers
 setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Source/bioclim/wc2.1_2.5m_bio")
 rasters.l <- list.files(pattern = "\\.tif$") 
 bioclim <- stack(rasters.l)
 
 bioclim_props <- list()
-for(i in 1:length(props_sf)){
-  bioclim_props[[i]] <- as.matrix(extract(bioclim, props_sf[i,]))
+for(i in 1:dim(props_sf)[1]){
+  bioclim_props[[i]] <- as.matrix(raster::extract(bioclim, props_sf[i,]))
 }
 
 bioclim_props_sum <- as.data.frame(do.call(rbind, bioclim_props))
@@ -85,13 +85,94 @@ random_data <- subset(data1_trn, type == "random")
 
 bioclim_propsTransformed <- predict(preProcValues, prop_values)
 
-library(fastshap)  # for fast (approximate) Shapley values
-library(ranger)    # for fast random forest algorithm
-
 # Prediction wrapper
 pfun <- function(object, newdata) {
   predict(object, newdata = newdata,  type = "prob")
 }
+
+# Plot individual explanations
+which_patch <- 2
+props_sf$num
+which_patch <- props_sf$num[which_patch]
+
+pre_patch <- predict(greedy_ensemble, newdata = bioclim_propsTransformed[props_sf$num[which_patch],], type="prob")
+pre_patch
+
+model_names <- rownames(varImp(greedy_ensemble)) 
+
+bioclim_propsTransformed <- bioclim_propsTransformed[,names(bioclim_propsTransformed) %in% model_names]
+X <- trainTransformed[,names(trainTransformed) %in% model_names]
+
+expl <- fastshap::explain(greedy_ensemble, X = X, pred_wrapper = pfun, nsim = 1000, newdata = bioclim_propsTransformed[which_patch, ])
+expl <- as.data.frame(t(expl))
+expl$variables <- rownames(expl)
+expl <- expl[expl$V1!=0,]
+
+#BIO1 = Annual Mean Temperature
+#
+#BIO2 = Mean Diurnal Range (Mean of monthly (max temp - min temp))
+#
+#BIO3 = Isothermality (BIO2/BIO7) (?100)
+
+#BIO4 = Temperature Seasonality (standard deviation ?100)
+
+#BIO5 = Max Temperature of Warmest Month
+
+#BIO6 = Min Temperature of Coldest Month
+
+#BIO7 = Temperature Annual Range (BIO5-BIO6)
+
+#BIO8 = Mean Temperature of Wettest Quarter
+
+#BIO9 = Mean Temperature of Driest Quarter
+
+#BIO10 = Mean Temperature of Warmest Quarter
+
+#BIO11 = Mean Temperature of Coldest Quarter
+
+#BIO12 = Annual Precipitation
+
+#BIO13 = Precipitation of Wettest Month
+
+#BIO14 = Precipitation of Driest Month
+
+#BIO15 = Precipitation Seasonality (Coefficient of Variation)
+
+#BIO16 = Precipitation of Wettest Quarter
+
+#BIO17 = Precipitation of Driest Quarter
+
+#BIO18 = Precipitation of Warmest Quarter
+
+#BIO19 = Precipitation of Coldest Quarter
+
+expl$var_names <- c(paste("Precipitation of wettest month =", round(prop_values$wc2.1_2.5m_bio_13)[which_patch], "mm"),
+                    paste("Precipitation of driest month =", round(prop_values$wc2.1_2.5m_bio_14)[which_patch], "mm"), 
+                    paste("Precipitation seasonality (CV) =", round(prop_values$wc2.1_2.5m_bio_15)[which_patch], "%"),
+                    paste("Precipitation of warmest quarter =", round(prop_values$wc2.1_2.5m_bio_18)[which_patch], "mm"),
+                    paste("Precipitation of coldest quarter =", round(prop_values$wc2.1_2.5m_bio_19)[which_patch], "mm"), 
+                    paste("Mean diurnal range =", round(prop_values$wc2.1_2.5m_bio_2)[which_patch], "\u00B0C"), 
+                    paste("Isothermality =", round(prop_values$wc2.1_2.5m_bio_3)[which_patch], ""), 
+                    paste("Mean temperature of wettest quarter =", round(prop_values$wc2.1_2.5m_bio_8)[which_patch], "\u00B0C"),
+                    paste("Mean temperature of driest quarter =", round(prop_values$wc2.1_2.5m_bio_9)[which_patch], "\u00B0C"))
+
+# Reorder following the value of another column:
+western_point2 <- expl %>%
+  mutate(Bioclim.variable = fct_reorder(var_names, V1)) %>%
+  ggplot( aes(x=Bioclim.variable, y=V1)) +
+  geom_bar(stat="identity", alpha= 0.6, width= 0.4) +
+  ggtitle(paste("(b) Site 1", "ensemble model probability =", round(pre_patch, 3)))+
+  theme(plot.title = element_text(hjust = 0.5))+
+  coord_flip() +
+  geom_hline(yintercept = 0, 
+             color = "black", size=0.7) +
+  xlab("") +
+  ylim(c(-0.2, 0.05))+
+  ylab("SHAP value (impact on model prediction)")+
+  theme_few()
+
+western_point2
+
 
 # Plot individual explanations
 which_patch <- 3
@@ -159,18 +240,12 @@ expl$var_names <- c(paste("Precipitation of wettest month =", round(prop_values$
                     paste("Mean temperature of wettest quarter =", round(prop_values$wc2.1_2.5m_bio_8)[which_patch], "\u00B0C"),
                     paste("Mean temperature of driest quarter =", round(prop_values$wc2.1_2.5m_bio_9)[which_patch], "\u00B0C"))
 
-
-library(ggplot2)
-library(ggthemes)
-library(dplyr)
-library(forcats)
-
 # Reorder following the value of another column:
 western_point3 <- expl %>%
   mutate(Bioclim.variable = fct_reorder(var_names, V1)) %>%
   ggplot( aes(x=Bioclim.variable, y=V1)) +
   geom_bar(stat="identity", alpha= 0.6, width= 0.4) +
-  ggtitle(paste("Site", props_sf$num[which_patch], "ensemble model probability =", round(pre_patch, 3)))+
+  ggtitle(paste("(c) Site 2", "ensemble model probability =", round(pre_patch, 3)))+
   theme(plot.title = element_text(hjust = 0.5))+
   coord_flip() +
   geom_hline(yintercept = 0, 
@@ -189,7 +264,7 @@ ex_pop <- readOGR(dsn=getwd(), layer="Texas_ocelot_current")
 bioclim_ex_pop <- list()
 for(i in 1:length(ex_pop)){
   print(i)
-  bioclim_ex_pop[[i]] <- colMeans(as.matrix(extract(bioclim, ex_pop[i,])[[1]]))
+  bioclim_ex_pop[[i]] <- colMeans(as.matrix(raster::extract(bioclim, ex_pop[i,])[[1]]))
 }
 
 ex_pop_data <- as.data.frame(do.call(rbind, bioclim_ex_pop))
@@ -264,7 +339,7 @@ exist_pop <- expl %>%
   mutate(Bioclim.variable = fct_reorder(var_names, V1)) %>%
   ggplot( aes(x=Bioclim.variable, y=V1)) +
   geom_bar(stat="identity", alpha= 0.6, width= 0.4) +
-  ggtitle(paste("Existing habitat ensemble model probability =", round(pre_patch, 3)))+
+  ggtitle(paste("(a) Existing habitat ensemble model probability =", round(pre_patch, 3)))+
   theme(plot.title = element_text(hjust = 0.5))+
   coord_flip() +
   geom_hline(yintercept = 0, 
@@ -304,12 +379,12 @@ library(jpeg)
 exist_map <- readJPEG('exist_map.jpeg')
 exist_pop2 <- exist_pop + annotation_raster(exist_map, ymin = -0.22,ymax= -0.13,xmin = 4.5,xmax = 8.5)
 
-## add map 1
+## add map 2
 
-aoi_map1 <- ggplot(polys) +
+aoi_map2 <- ggplot(polys) +
   theme_few()+
   geom_sf(size = 1.1)+
-  geom_sf(data = props_sf[1,], size = 6, shape = 23, fill = "black")+
+  geom_sf(data = props_sf[2,], size = 6, shape = 23, fill = "black")+
   #  geom_sf_text(data = ex_pop, aes(label = num), colour = "white")+
   xlab("")+
   ylab("")+ theme(axis.text.x=element_blank(), #remove x axis labels
@@ -322,19 +397,50 @@ aoi_map1 <- ggplot(polys) +
     panel.grid.minor = element_blank(), 
     axis.line = element_line(colour = "white")
   )
-aoi_map1 
+aoi_map2 
 
 setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
-jpeg(filename = "map1.jpeg", width = 500, height = 500,
+jpeg(filename = "map2.jpeg", width = 500, height = 500,
      pointsize = 12, quality = 100, bg = "white", res = 200)
-aoi_map1
+aoi_map2
 dev.off()
 
-map1 <- readJPEG('map1.jpeg')
-map1_add <- western_point1 + annotation_raster(map1, ymin = -0.22,ymax= -0.13,xmin = 4.5,xmax = 8.5)
+map2 <- readJPEG('map2.jpeg')
+map2_add <- western_point2 + annotation_raster(map2, ymin = -0.22,ymax= -0.13,xmin = 4.5,xmax = 8.5)
 
 
-ggarrange(exist_pop2, map1_add, nrow = 2, ncol = 1)
+## add map 3
 
-# Can create plots for sites 2 and 3 by changing "which_patch" value to 2 and 3, respectively
+aoi_map3 <- ggplot(polys) +
+  theme_few()+
+  geom_sf(size = 1.1)+
+  geom_sf(data = props_sf[3,], size = 6, shape = 23, fill = "black")+
+  #  geom_sf_text(data = ex_pop, aes(label = num), colour = "white")+
+  xlab("")+
+  ylab("")+ theme(axis.text.x=element_blank(), #remove x axis labels
+                  axis.ticks.x=element_blank(), #remove x axis ticks
+                  axis.text.y=element_blank(),  #remove y axis labels
+                  axis.ticks.y=element_blank()  #remove y axis ticks
+  )+  theme(
+    panel.border = element_blank(), 
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(colour = "white")
+  )
+aoi_map3 
+
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
+jpeg(filename = "map3.jpeg", width = 500, height = 500,
+     pointsize = 12, quality = 100, bg = "white", res = 200)
+aoi_map3
+dev.off()
+
+map3 <- readJPEG('map3.jpeg')
+map3_add <- western_point3 + annotation_raster(map3, ymin = -0.22,ymax= -0.13,xmin = 4.5,xmax = 8.5)
+
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
+jpeg(filename = "shapley.jpeg", width = 2500, height = 3500,
+     pointsize = 12, quality = 100, bg = "white", res = 300)
+ggarrange(exist_pop2, map2_add, map3_add, nrow = 3, ncol = 1)
+dev.off()
 

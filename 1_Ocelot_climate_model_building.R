@@ -26,6 +26,7 @@ library(randomForest)
 library(xgboost)
 library(kernlab)
 library(caTools)
+library(DALEX)
 # the below package is used to generate random locations according to 
 # the probability of a raster. It is not available on Cran
 #install.packages("remotes")
@@ -237,7 +238,67 @@ greedy_ensemble <- caretEnsemble(
 
 summary(greedy_ensemble)
 
-varImp(greedy_ensemble)
+
+########################################
+# Variable importance #################
+#######################################
+
+y <- testTransformed$type
+y <- ifelse(y=="random", 0, 1)
+
+explainer_em <- DALEX::explain(model = greedy_ensemble, 
+                               data = testTransformed[,-10], 
+                               y = y)
+
+logit <- function(x) exp(x)/(1+exp(x))
+custom_loss <- function(observed, predicted){
+  sum((observed - logit(predicted))^2)
+}
+attr(custom_loss, "loss_name") <- "Logit residuals"
+set.seed(1111)
+model_parts_em <- DALEX::model_parts(explainer_em, type = "raw",
+                                       loss_function = custom_loss)
+head(model_parts_em, 9)
+plot(model_parts_em)
+
+
+line_num <- model_parts_em$dropout_loss[model_parts_em$variable=="_full_model_"][1]
+index <- which(model_parts_em$variable %in% c("_full_model_", "_baseline_"))
+model_parts_em <- model_parts_em[-index,]
+
+model_parts_em$var_nam <- NA
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_2"] <- "Mean diurnal range (BIO2)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_18"] <- "Precipitation of warmest quarter (BIO18)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_3"] <- "Isothermality (BIO3)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_15"] <- "Precipitation seasonality (CV) (BIO15)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_14"] <- "Precipitation of driest month (BIO14)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_9"] <- "Mean temperature of driest quarter (BIO9)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_13"] <- "Precipitation of wettest month (BIO13)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_19"] <- "Precipitation of coldest quarter (BIO19)"
+model_parts_em$var_nam[model_parts_em$variable == "wc2.1_2.5m_bio_8"] <- "Mean temperature of wettest quarter (BIO8)"
+
+var_order <- names(sort(tapply(model_parts_em$dropout_loss, list(model_parts_em$var_nam), mean)))
+model_parts_em$var_nam <- factor(model_parts_em$var_nam, levels = var_order)
+
+var_imp <- ggplot(model_parts_em, aes(x=var_nam, dropout_loss))+
+  geom_boxplot() +
+  ylab("Logit residuals loss after permutations") +
+  xlab("") +
+  theme_few(18)+
+  coord_flip()+
+  geom_hline(yintercept = line_num, linetype="dashed")+
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+var_imp
+
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
+jpeg(filename = "variable_importance.jpeg", width = 3500, height = 3000,
+     pointsize = 12, quality = 100, bg = "white", res = 300)
+var_imp
+dev.off()
 
 saveRDS(greedy_ensemble, "greedy_ensemble_ocelot_climate.RDS")
 greedy_ensemble <- readRDS("greedy_ensemble_ocelot_climate.RDS")
