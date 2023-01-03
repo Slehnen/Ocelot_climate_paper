@@ -21,59 +21,59 @@ library(forcats)
 library(fastshap)  # for fast (approximate) Shapley values
 library(ranger)    # for fast random forest algorithm
 
-set.seed(123)
+set.seed(1111)
 
 setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Source")
-aoi <- readOGR(dsn=getwd(), layer="FWS_10_j_evaluation_AOI")
-polys <- st_read("FWS_10_j_evaluation_AOI.shp")
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Source")
-# Code below randomly selected three patches from protected areas
-# database that were larger than 150,000 ha
-#props_sf <- st_read("PAD_AOI.shp")
-#props_sf <- subset(props_sf, SHAPE_Area > 150000)
-#random_sample <- sample(1:dim(props_sf)[1], 3)
-#props_sf <- props_sf[random_sample,]
-#props_sf <- st_centroid(props_sf)
+aoi <- st_read(dsn ="AOI_climate_availability_2_10_22.shp")
 
-
-setwd("C:/Users/slehnen/Onedrive - DOI/Ocelot_collab/work")
+setwd("C:/Users/slehnen/Onedrive - DOI/Ocelot_collab/source")
 #saveRDS(props_sf, "example_PADS.RDS")
-props_sf <- readRDS("example_PADS.RDS")
-props_sf$num <- 1:3
+props_sf <- st_read(dsn ="example_sites_full_aoi.shp")
+props_sf <- props_sf[,"NAME"]
+props_sf$num <- c(2, 1, 4, 3)
+props_sf <- props_sf[order(props_sf$num),]
 
-aoi_plot <- ggplot(polys) +
-  theme_few()+
+aoi_plot <- ggplot(aoi) +
+  theme_few(17)+
   geom_sf()+
-  geom_sf(data = props_sf, size = 7, shape = 23, fill = "darkred")+
-  geom_sf_text(data = props_sf, aes(label = num), colour = "white")+
+  #geom_sf(data = props_sf, size = 1, shape = 23, fill = "darkred")+
+  geom_sf_text(data = props_sf, size = 7, aes(label = num), colour = "black")+
   xlab("")+
   ylab("")
 aoi_plot
 
 ## directory to current bioclim layers
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Source/bioclim/wc2.1_2.5m_bio")
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/source")
+soil <- raster("clay_pct_15_30cm_aoi_resample_na_removed.tif")
+
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Work/chelsea")
 rasters.l <- list.files(pattern = "\\.tif$") 
-bioclim <- stack(rasters.l)
+r1 <- raster(rasters.l[1])
+soil <- resample(soil, r1)
 
-bioclim_props <- list()
-for(i in 1:dim(props_sf)[1]){
-  bioclim_props[[i]] <- as.matrix(raster::extract(bioclim, props_sf[i,]))
-}
+bioclim <- c("CHELSA_bio1_1981.2010_V.2.1", "CHELSA_bio10_1981.2010_V.2.1",
+             "CHELSA_bio11_1981.2010_V.2.1", "CHELSA_bio12_1981.2010_V.2.1",
+             "CHELSA_bio13_1981.2010_V.2.1", "CHELSA_bio14_1981.2010_V.2.1",
+             "CHELSA_bio15_1981.2010_V.2.1", "CHELSA_bio16_1981.2010_V.2.1",
+             "CHELSA_bio17_1981.2010_V.2.1", "CHELSA_bio18_1981.2010_V.2.1",
+             "CHELSA_bio19_1981.2010_V.2.1", "CHELSA_bio2_1981.2010_V.2.1", 
+             "CHELSA_bio3_1981.2010_V.2.1",  "CHELSA_bio4_1981.2010_V.2.1", 
+             "CHELSA_bio5_1981.2010_V.2.1",   "CHELSA_bio6_1981.2010_V.2.1", 
+             "CHELSA_bio7_1981.2010_V.2.1", "CHELSA_bio8_1981.2010_V.2.1", 
+             "CHELSA_bio9_1981.2010_V.2.1")
+all <- stack(rasters.l, soil)
+names(all)[1:19] <- bioclim
+names(all)[20] <- "soil"
 
-bioclim_props_sum <- as.data.frame(do.call(rbind, bioclim_props))
-bioclim_props_sum$patch_id <- props_sf$num 
+prop_values <- raster::extract(x=all, y=props_sf, fun=median, df=TRUE)
 
-
-prop_values <- bioclim_props_sum
 
 setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Work")
-greedy_ensemble <- readRDS("greedy_ensemble_ocelot_climate.RDS")
-
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Work")
-preProcValues <- readRDS("preProcValues_ocelot_climate.RDS")
-trainTransformed <- readRDS("trainTransformed_ocelot_climate.RDS")
-testTransformed <- readRDS("testTransformed_ocelot_climate.RDS")
-data1_trn <- readRDS("training_data_ocelot_climate.RDS")
+preProcValues <- readRDS("preProcValues_ocelot_climate_10_31_22.RDS")
+trainTransformed <- readRDS("trainTransformed_ocelot_climate_10_31_22.RDS")
+testTransformed <- readRDS("testTransformed_ocelot_climate_10_31_22.RDS")
+greedy_ensemble <- readRDS("greedy_ensemble_ocelot_climate_10_31_22.RDS")
+data1_trn <- readRDS("training_data_ocelot_climate_10_31_22.RDS")
 
 ocelots_data <- subset(data1_trn, type == "ocelot")
 random_data <- subset(data1_trn, type == "random")
@@ -83,12 +83,100 @@ random_data <- subset(data1_trn, type == "random")
 # Shapely ###############################
 #########################################
 
+index <- which(names(prop_values) %in% rownames(varImp(greedy_ensemble)))
+prop_values <- prop_values[,index]
+
 bioclim_propsTransformed <- predict(preProcValues, prop_values)
 
 # Prediction wrapper
 pfun <- function(object, newdata) {
   predict(object, newdata = newdata,  type = "prob")
 }
+
+# Plot individual explanations
+which_patch <- 1
+props_sf$num
+which_patch <- props_sf$num[which_patch]
+
+pre_patch <- predict(greedy_ensemble, newdata = bioclim_propsTransformed[props_sf$num[which_patch],], type="prob")
+pre_patch
+
+model_names <- rownames(varImp(greedy_ensemble)) 
+
+bioclim_propsTransformed <- bioclim_propsTransformed[,names(bioclim_propsTransformed) %in% model_names]
+X <- trainTransformed[,names(trainTransformed) %in% model_names]
+
+expl <- fastshap::explain(greedy_ensemble, X = X, pred_wrapper = pfun, nsim = 1000, newdata = bioclim_propsTransformed[which_patch, ])
+expl <- as.data.frame(t(expl))
+expl$variables <- rownames(expl)
+expl <- expl[expl$V1!=0,]
+
+#BIO1 = Annual Mean Temperature
+#
+#BIO2 = Mean Diurnal Range (Mean of monthly (max temp - min temp))
+#
+#BIO3 = Isothermality (BIO2/BIO7) (?100)
+
+#BIO4 = temp. Seasonality (standard deviation ?100)
+
+#BIO5 = Max temp. of Warmest Month
+
+#BIO6 = Min temp. of Coldest Month
+
+#BIO7 = temp. Annual Range (BIO5-BIO6)
+
+#BIO8 = Mean temp. of Wettest Quarter
+
+#BIO9 = Mean temp. of Driest Quarter
+
+#BIO10 = Mean temp. of Warmest Quarter
+
+#BIO11 = Mean temp. of Coldest Quarter
+
+#BIO12 = Annual Precipitation
+
+#BIO13 = Precip. of Wettest Month
+
+#BIO14 = Precip. of Driest Month
+
+#BIO15 = Precip. Seasonality (Coefficient of Variation)
+
+#BIO16 = Precip. of Wettest Quarter
+
+#BIO17 = Precip. of Driest Quarter
+
+#BIO18 = Precip. of Warmest Quarter
+
+#BIO19 = Precip. of Coldest Quarter
+
+expl$var_names <- c(paste("Clay =", round(prop_values$soil*0.1)[which_patch], "% (15-30 cm)"),
+                    paste("Precip. of wettest month =", round(prop_values$CHELSA_bio13_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of driest month =", round(prop_values$CHELSA_bio14_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Precip. seasonality (CV) =", round(prop_values$CHELSA_bio15_1981.2010_V.2.1*0.1)[which_patch], "%"),
+                    paste("Precip. of warmest quarter =", round(prop_values$CHELSA_bio18_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of coldest quarter =", round(prop_values$CHELSA_bio19_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Mean diurnal range =", round(prop_values$CHELSA_bio2_1981.2010_V.2.1*0.1)[which_patch], "\u00B0C"), 
+                    paste("Isothermality =", round(prop_values$CHELSA_bio3_1981.2010_V.2.1*0.1)[which_patch], ""), 
+                    paste("Mean temp. of wettest quarter =", round(prop_values$CHELSA_bio8_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"),
+                    paste("Mean temp. of driest quarter =", round(prop_values$CHELSA_bio9_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"))
+
+
+mexico <- expl %>%
+  mutate(Bioclim.variable = fct_reorder(var_names, V1)) %>%
+  ggplot( aes(x=Bioclim.variable, y=V1)) +
+  geom_bar(stat="identity", alpha= 0.6, width= 0.4) +
+  ggtitle(paste("(a) El Cielo", "ensemble model probability =", round(pre_patch, 3)))+
+  theme(plot.title = element_text(hjust = 0.5))+
+  coord_flip() +
+  geom_hline(yintercept = 0, 
+             color = "black", linewidth=0.7) +
+  xlab("") +
+  ylim(c(-0.2, 0.1))+
+  ylab("Shapley value (impact on model prediction)")+
+  theme_few(17)
+
+mexico
+
 
 # Plot individual explanations
 which_patch <- 2
@@ -114,65 +202,65 @@ expl <- expl[expl$V1!=0,]
 #
 #BIO3 = Isothermality (BIO2/BIO7) (?100)
 
-#BIO4 = Temperature Seasonality (standard deviation ?100)
+#BIO4 = temp. Seasonality (standard deviation ?100)
 
-#BIO5 = Max Temperature of Warmest Month
+#BIO5 = Max temp. of Warmest Month
 
-#BIO6 = Min Temperature of Coldest Month
+#BIO6 = Min temp. of Coldest Month
 
-#BIO7 = Temperature Annual Range (BIO5-BIO6)
+#BIO7 = temp. Annual Range (BIO5-BIO6)
 
-#BIO8 = Mean Temperature of Wettest Quarter
+#BIO8 = Mean temp. of Wettest Quarter
 
-#BIO9 = Mean Temperature of Driest Quarter
+#BIO9 = Mean temp. of Driest Quarter
 
-#BIO10 = Mean Temperature of Warmest Quarter
+#BIO10 = Mean temp. of Warmest Quarter
 
-#BIO11 = Mean Temperature of Coldest Quarter
+#BIO11 = Mean temp. of Coldest Quarter
 
 #BIO12 = Annual Precipitation
 
-#BIO13 = Precipitation of Wettest Month
+#BIO13 = Precip. of Wettest Month
 
-#BIO14 = Precipitation of Driest Month
+#BIO14 = Precip. of Driest Month
 
-#BIO15 = Precipitation Seasonality (Coefficient of Variation)
+#BIO15 = Precip. Seasonality (Coefficient of Variation)
 
-#BIO16 = Precipitation of Wettest Quarter
+#BIO16 = Precip. of Wettest Quarter
 
-#BIO17 = Precipitation of Driest Quarter
+#BIO17 = Precip. of Driest Quarter
 
-#BIO18 = Precipitation of Warmest Quarter
+#BIO18 = Precip. of Warmest Quarter
 
-#BIO19 = Precipitation of Coldest Quarter
+#BIO19 = Precip. of Coldest Quarter
 
-expl$var_names <- c(paste("Precipitation of wettest month =", round(prop_values$wc2.1_2.5m_bio_13)[which_patch], "mm"),
-                    paste("Precipitation of driest month =", round(prop_values$wc2.1_2.5m_bio_14)[which_patch], "mm"), 
-                    paste("Precipitation seasonality (CV) =", round(prop_values$wc2.1_2.5m_bio_15)[which_patch], "%"),
-                    paste("Precipitation of warmest quarter =", round(prop_values$wc2.1_2.5m_bio_18)[which_patch], "mm"),
-                    paste("Precipitation of coldest quarter =", round(prop_values$wc2.1_2.5m_bio_19)[which_patch], "mm"), 
-                    paste("Mean diurnal range =", round(prop_values$wc2.1_2.5m_bio_2)[which_patch], "\u00B0C"), 
-                    paste("Isothermality =", round(prop_values$wc2.1_2.5m_bio_3)[which_patch], ""), 
-                    paste("Mean temperature of wettest quarter =", round(prop_values$wc2.1_2.5m_bio_8)[which_patch], "\u00B0C"),
-                    paste("Mean temperature of driest quarter =", round(prop_values$wc2.1_2.5m_bio_9)[which_patch], "\u00B0C"))
+expl$var_names <- c(paste("Clay =", round(prop_values$soil*0.1)[which_patch], "% (15-30 cm)"),
+                    paste("Precip. of wettest month =", round(prop_values$CHELSA_bio13_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of driest month =", round(prop_values$CHELSA_bio14_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Precip. seasonality (CV) =", round(prop_values$CHELSA_bio15_1981.2010_V.2.1*0.1)[which_patch], "%"),
+                    paste("Precip. of warmest quarter =", round(prop_values$CHELSA_bio18_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of coldest quarter =", round(prop_values$CHELSA_bio19_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Mean diurnal range =", round(prop_values$CHELSA_bio2_1981.2010_V.2.1*0.1)[which_patch], "\u00B0C"), 
+                    paste("Isothermality =", round(prop_values$CHELSA_bio3_1981.2010_V.2.1*0.1)[which_patch], ""), 
+                    paste("Mean temp. of wettest quarter =", round(prop_values$CHELSA_bio8_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"),
+                    paste("Mean temp. of driest quarter =", round(prop_values$CHELSA_bio9_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"))
 
 # Reorder following the value of another column:
-western_point2 <- expl %>%
+costa <- expl %>%
   mutate(Bioclim.variable = fct_reorder(var_names, V1)) %>%
   ggplot( aes(x=Bioclim.variable, y=V1)) +
   geom_bar(stat="identity", alpha= 0.6, width= 0.4) +
-  ggtitle(paste("(b) Site 1", "ensemble model probability =", round(pre_patch, 3)))+
+  ggtitle(paste("(b) Pacuare River", "ensemble model probability =", round(pre_patch, 3)))+
   theme(plot.title = element_text(hjust = 0.5))+
   coord_flip() +
   geom_hline(yintercept = 0, 
              color = "black", size=0.7) +
   xlab("") +
-  ylim(c(-0.2, 0.05))+
-  ylab("SHAP value (impact on model prediction)")+
-  theme_few()
+  ylim(c(-0.2, 0.1))+
+  ylab("Shapley value (impact on model prediction)")+
+  theme_few(17)
 
-western_point2
-
+costa
 
 # Plot individual explanations
 which_patch <- 3
@@ -198,89 +286,80 @@ expl <- expl[expl$V1!=0,]
 #
 #BIO3 = Isothermality (BIO2/BIO7) (?100)
 
-#BIO4 = Temperature Seasonality (standard deviation ?100)
+#BIO4 = temp. Seasonality (standard deviation ?100)
 
-#BIO5 = Max Temperature of Warmest Month
+#BIO5 = Max temp. of Warmest Month
 
-#BIO6 = Min Temperature of Coldest Month
+#BIO6 = Min temp. of Coldest Month
 
-#BIO7 = Temperature Annual Range (BIO5-BIO6)
+#BIO7 = temp. Annual Range (BIO5-BIO6)
 
-#BIO8 = Mean Temperature of Wettest Quarter
+#BIO8 = Mean temp. of Wettest Quarter
 
-#BIO9 = Mean Temperature of Driest Quarter
+#BIO9 = Mean temp. of Driest Quarter
 
-#BIO10 = Mean Temperature of Warmest Quarter
+#BIO10 = Mean temp. of Warmest Quarter
 
-#BIO11 = Mean Temperature of Coldest Quarter
+#BIO11 = Mean temp. of Coldest Quarter
 
 #BIO12 = Annual Precipitation
 
-#BIO13 = Precipitation of Wettest Month
+#BIO13 = Precip. of Wettest Month
 
-#BIO14 = Precipitation of Driest Month
+#BIO14 = Precip. of Driest Month
 
-#BIO15 = Precipitation Seasonality (Coefficient of Variation)
+#BIO15 = Precip. Seasonality (Coefficient of Variation)
 
-#BIO16 = Precipitation of Wettest Quarter
+#BIO16 = Precip. of Wettest Quarter
 
-#BIO17 = Precipitation of Driest Quarter
+#BIO17 = Precip. of Driest Quarter
 
-#BIO18 = Precipitation of Warmest Quarter
+#BIO18 = Precip. of Warmest Quarter
 
-#BIO19 = Precipitation of Coldest Quarter
+#BIO19 = Precip. of Coldest Quarter
 
-expl$var_names <- c(paste("Precipitation of wettest month =", round(prop_values$wc2.1_2.5m_bio_13)[which_patch], "mm"),
-                    paste("Precipitation of driest month =", round(prop_values$wc2.1_2.5m_bio_14)[which_patch], "mm"), 
-                    paste("Precipitation seasonality (CV) =", round(prop_values$wc2.1_2.5m_bio_15)[which_patch], "%"),
-                    paste("Precipitation of warmest quarter =", round(prop_values$wc2.1_2.5m_bio_18)[which_patch], "mm"),
-                    paste("Precipitation of coldest quarter =", round(prop_values$wc2.1_2.5m_bio_19)[which_patch], "mm"), 
-                    paste("Mean diurnal range =", round(prop_values$wc2.1_2.5m_bio_2)[which_patch], "\u00B0C"), 
-                    paste("Isothermality =", round(prop_values$wc2.1_2.5m_bio_3)[which_patch], ""), 
-                    paste("Mean temperature of wettest quarter =", round(prop_values$wc2.1_2.5m_bio_8)[which_patch], "\u00B0C"),
-                    paste("Mean temperature of driest quarter =", round(prop_values$wc2.1_2.5m_bio_9)[which_patch], "\u00B0C"))
+expl$var_names <- c(paste("Clay =", round(prop_values$soil*0.1)[which_patch], "% (15-30 cm)"),
+                    paste("Precip. of wettest month =", round(prop_values$CHELSA_bio13_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of driest month =", round(prop_values$CHELSA_bio14_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Precip. seasonality (CV) =", round(prop_values$CHELSA_bio15_1981.2010_V.2.1*0.1)[which_patch], "%"),
+                    paste("Precip. of warmest quarter =", round(prop_values$CHELSA_bio18_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of coldest quarter =", round(prop_values$CHELSA_bio19_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Mean diurnal range =", round(prop_values$CHELSA_bio2_1981.2010_V.2.1*0.1)[which_patch], "\u00B0C"), 
+                    paste("Isothermality =", round(prop_values$CHELSA_bio3_1981.2010_V.2.1*0.1)[which_patch], ""), 
+                    paste("Mean temp. of wettest quarter =", round(prop_values$CHELSA_bio8_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"),
+                    paste("Mean temp. of driest quarter =", round(prop_values$CHELSA_bio9_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"))
 
 # Reorder following the value of another column:
-western_point3 <- expl %>%
+amazon <- expl %>%
   mutate(Bioclim.variable = fct_reorder(var_names, V1)) %>%
   ggplot( aes(x=Bioclim.variable, y=V1)) +
   geom_bar(stat="identity", alpha= 0.6, width= 0.4) +
-  ggtitle(paste("(c) Site 2", "ensemble model probability =", round(pre_patch, 3)))+
+  ggtitle(paste("(c) Tapauá", "ensemble model probability =", round(pre_patch, 3)))+
   theme(plot.title = element_text(hjust = 0.5))+
   coord_flip() +
   geom_hline(yintercept = 0, 
              color = "black", size=0.7) +
   xlab("") +
- ylim(c(-0.2, 0.05))+
-  ylab("SHAP value (impact on model prediction)")+
-  theme_few()
+  ylim(c(-0.2, 0.1))+
+  ylab("Shapley value (impact on model prediction)")+
+  theme_few(17)
 
-western_point3
+amazon
 
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/source")
-ex_pop2 <- st_read("Texas_ocelot_current.shp")
-ex_pop <- readOGR(dsn=getwd(), layer="Texas_ocelot_current")
-
-bioclim_ex_pop <- list()
-for(i in 1:length(ex_pop)){
-  print(i)
-  bioclim_ex_pop[[i]] <- colMeans(as.matrix(raster::extract(bioclim, ex_pop[i,])[[1]]))
-}
-
-ex_pop_data <- as.data.frame(do.call(rbind, bioclim_ex_pop))
-ex_pop_data_sum <- as.data.frame(t(colMeans(ex_pop_data)))
-ex_pop_data_sum_Transformed <- predict(preProcValues, ex_pop_data_sum)
 # Plot individual explanations
+which_patch <- 4
+props_sf$num
+which_patch <- props_sf$num[which_patch]
 
-pre_patch <- predict(greedy_ensemble, newdata = ex_pop_data_sum_Transformed, type="prob")
+pre_patch <- predict(greedy_ensemble, newdata = bioclim_propsTransformed[props_sf$num[which_patch],], type="prob")
 pre_patch
 
 model_names <- rownames(varImp(greedy_ensemble)) 
 
-ex_pop_data_sum_Transformed <- ex_pop_data_sum_Transformed[,names(ex_pop_data_sum_Transformed) %in% model_names]
+bioclim_propsTransformed <- bioclim_propsTransformed[,names(bioclim_propsTransformed) %in% model_names]
 X <- trainTransformed[,names(trainTransformed) %in% model_names]
 
-expl <- fastshap::explain(greedy_ensemble, X = X, pred_wrapper = pfun, nsim = 500, newdata = ex_pop_data_sum_Transformed)
+expl <- fastshap::explain(greedy_ensemble, X = X, pred_wrapper = pfun, nsim = 1000, newdata = bioclim_propsTransformed[which_patch, ])
 expl <- as.data.frame(t(expl))
 expl$variables <- rownames(expl)
 expl <- expl[expl$V1!=0,]
@@ -291,156 +370,179 @@ expl <- expl[expl$V1!=0,]
 #
 #BIO3 = Isothermality (BIO2/BIO7) (?100)
 
-#BIO4 = Temperature Seasonality (standard deviation ?100)
+#BIO4 = temp. Seasonality (standard deviation ?100)
 
-#BIO5 = Max Temperature of Warmest Month
+#BIO5 = Max temp. of Warmest Month
 
-#BIO6 = Min Temperature of Coldest Month
+#BIO6 = Min temp. of Coldest Month
 
-#BIO7 = Temperature Annual Range (BIO5-BIO6)
+#BIO7 = temp. Annual Range (BIO5-BIO6)
 
-#BIO8 = Mean Temperature of Wettest Quarter
+#BIO8 = Mean temp. of Wettest Quarter
 
-#BIO9 = Mean Temperature of Driest Quarter
+#BIO9 = Mean temp. of Driest Quarter
 
-#BIO10 = Mean Temperature of Warmest Quarter
+#BIO10 = Mean temp. of Warmest Quarter
 
-#BIO11 = Mean Temperature of Coldest Quarter
+#BIO11 = Mean temp. of Coldest Quarter
 
 #BIO12 = Annual Precipitation
 
-#BIO13 = Precipitation of Wettest Month
+#BIO13 = Precip. of Wettest Month
 
-#BIO14 = Precipitation of Driest Month
+#BIO14 = Precip. of Driest Month
 
-#BIO15 = Precipitation Seasonality (Coefficient of Variation)
+#BIO15 = Precip. Seasonality (Coefficient of Variation)
 
-#BIO16 = Precipitation of Wettest Quarter
+#BIO16 = Precip. of Wettest Quarter
 
-#BIO17 = Precipitation of Driest Quarter
+#BIO17 = Precip. of Driest Quarter
 
-#BIO18 = Precipitation of Warmest Quarter
+#BIO18 = Precip. of Warmest Quarter
 
-#BIO19 = Precipitation of Coldest Quarter
+#BIO19 = Precip. of Coldest Quarter
 
-expl$var_names <- c(paste("Precipitation of wettest month =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_13"]), "mm"),
-                    paste("Precipitation of driest month =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_14"]), "mm"), 
-                    paste("Precipitation seasonality (CV) =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_15"]), "%"),
-                    paste("Precipitation of warmest quarter =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_18"]), "mm"),
-                    paste("Precipitation of coldest quarter =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_19"]), "mm"), 
-                    paste("Mean diurnal range =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_2"]), "\u00B0C"), 
-                    paste("Isothermality =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_3"]), ""), 
-                    paste("Mean temperature of wettest quarter =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_8"]), "\u00B0C"),
-                    paste("Mean temperature of driest quarter =", round(bioclim_ex_pop[[1]][names(bioclim_ex_pop[[1]]) == "wc2.1_2.5m_bio_9"]), "\u00B0C"))
-
+expl$var_names <- c(paste("Clay =", round(prop_values$soil*0.1)[which_patch], "% (15-30 cm)"),
+                    paste("Precip. of wettest month =", round(prop_values$CHELSA_bio13_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of driest month =", round(prop_values$CHELSA_bio14_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Precip. seasonality (CV) =", round(prop_values$CHELSA_bio15_1981.2010_V.2.1*0.1)[which_patch], "%"),
+                    paste("Precip. of warmest quarter =", round(prop_values$CHELSA_bio18_1981.2010_V.2.1*0.1)[which_patch], "mm"),
+                    paste("Precip. of coldest quarter =", round(prop_values$CHELSA_bio19_1981.2010_V.2.1*0.1)[which_patch], "mm"), 
+                    paste("Mean diurnal range =", round(prop_values$CHELSA_bio2_1981.2010_V.2.1*0.1)[which_patch], "\u00B0C"), 
+                    paste("Isothermality =", round(prop_values$CHELSA_bio3_1981.2010_V.2.1*0.1)[which_patch], ""), 
+                    paste("Mean temp. of wettest quarter =", round(prop_values$CHELSA_bio8_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"),
+                    paste("Mean temp. of driest quarter =", round(prop_values$CHELSA_bio9_1981.2010_V.2.1*0.1 - 273.15)[which_patch], "\u00B0C"))
 
 # Reorder following the value of another column:
-exist_pop <- expl %>%
+atlantic <- expl %>%
   mutate(Bioclim.variable = fct_reorder(var_names, V1)) %>%
   ggplot( aes(x=Bioclim.variable, y=V1)) +
   geom_bar(stat="identity", alpha= 0.6, width= 0.4) +
-  ggtitle(paste("(a) Existing habitat ensemble model probability =", round(pre_patch, 3)))+
+  ggtitle(paste("(d) Serra Geral", "ensemble model probability =", round(pre_patch, 3)))+
   theme(plot.title = element_text(hjust = 0.5))+
   coord_flip() +
   geom_hline(yintercept = 0, 
              color = "black", size=0.7) +
   xlab("") +
-  ylim(c(-0.2, 0.05))+
-  ylab("SHAP value (impact on model prediction)")+
-  theme_few()
-exist_pop
+  ylim(c(-0.2, 0.1))+
+  ylab("Shapley value (impact on model prediction)")+
+  theme_few(17)
 
-aoi_exist <- ggplot(polys) +
-  theme_few()+
-  geom_sf(size = 1.1)+
-  geom_sf(data = ex_pop2, size = 1, shape = 1, colour = "black", fill = "black")+
-#  geom_sf_text(data = ex_pop, aes(label = num), colour = "white")+
+atlantic
+
+mexico_map <- ggplot(aoi) +
+  theme_few(17)+
+  geom_sf()+
+  geom_sf_text(data = props_sf[1,], size = 7, aes(label = "x"), colour = "red")+
   xlab("")+
-  ylab("")+ theme(axis.text.x=element_blank(), #remove x axis labels
-                  axis.ticks.x=element_blank(), #remove x axis ticks
-                  axis.text.y=element_blank(),  #remove y axis labels
-                  axis.ticks.y=element_blank()  #remove y axis ticks
-  )+  theme(
-    panel.border = element_blank(), 
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(), 
-    axis.line = element_line(colour = "white")
+  ylab("")+
+  theme(axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank(), #remove x axis ticks
+        axis.text.y=element_blank(),  #remove y axis labels
+        axis.ticks.y=element_blank(),  #remove y axis ticks
+        panel.border = element_blank()
   )
-aoi_exist 
+mexico_map
 
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
-jpeg(filename = "exist_map.jpeg", width = 500, height = 500,
-     pointsize = 12, quality = 100, bg = "white", res = 200)
-aoi_exist
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures/Revised_figures")
+jpeg(filename = "mexico.jpeg", width = 800, height = 800,
+     pointsize = 12, quality = 100, bg = "white", res = 300)
+mexico_map
 dev.off()
+
 
 ## add map existing
 library(jpeg)
-exist_map <- readJPEG('exist_map.jpeg')
-exist_pop2 <- exist_pop + annotation_raster(exist_map, ymin = -0.22,ymax= -0.13,xmin = 4.5,xmax = 8.5)
+mexico_map <- readJPEG('mexico.jpeg')
+mexico2 <- mexico + annotation_raster(mexico_map, ymin = -0.2,ymax= -0.075, xmin = 5,xmax = 11.1)
+mexico2
+## costa rica
 
-## add map 2
-
-aoi_map2 <- ggplot(polys) +
-  theme_few()+
-  geom_sf(size = 1.1)+
-  geom_sf(data = props_sf[2,], size = 6, shape = 23, fill = "black")+
-  #  geom_sf_text(data = ex_pop, aes(label = num), colour = "white")+
+costa_map <- ggplot(aoi) +
+  theme_few(17)+
+  geom_sf()+
+  geom_sf_text(data = props_sf[2,], size = 7, aes(label = "x"), colour = "red")+
   xlab("")+
-  ylab("")+ theme(axis.text.x=element_blank(), #remove x axis labels
-                  axis.ticks.x=element_blank(), #remove x axis ticks
-                  axis.text.y=element_blank(),  #remove y axis labels
-                  axis.ticks.y=element_blank()  #remove y axis ticks
-  )+  theme(
-    panel.border = element_blank(), 
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(), 
-    axis.line = element_line(colour = "white")
+  ylab("")+
+  theme(axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank(), #remove x axis ticks
+        axis.text.y=element_blank(),  #remove y axis labels
+        axis.ticks.y=element_blank(),  #remove y axis ticks
+        panel.border = element_blank()
   )
-aoi_map2 
+costa_map
 
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
-jpeg(filename = "map2.jpeg", width = 500, height = 500,
-     pointsize = 12, quality = 100, bg = "white", res = 200)
-aoi_map2
-dev.off()
-
-map2 <- readJPEG('map2.jpeg')
-map2_add <- western_point2 + annotation_raster(map2, ymin = -0.22,ymax= -0.13,xmin = 4.5,xmax = 8.5)
-
-
-## add map 3
-
-aoi_map3 <- ggplot(polys) +
-  theme_few()+
-  geom_sf(size = 1.1)+
-  geom_sf(data = props_sf[3,], size = 6, shape = 23, fill = "black")+
-  #  geom_sf_text(data = ex_pop, aes(label = num), colour = "white")+
-  xlab("")+
-  ylab("")+ theme(axis.text.x=element_blank(), #remove x axis labels
-                  axis.ticks.x=element_blank(), #remove x axis ticks
-                  axis.text.y=element_blank(),  #remove y axis labels
-                  axis.ticks.y=element_blank()  #remove y axis ticks
-  )+  theme(
-    panel.border = element_blank(), 
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(), 
-    axis.line = element_line(colour = "white")
-  )
-aoi_map3 
-
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
-jpeg(filename = "map3.jpeg", width = 500, height = 500,
-     pointsize = 12, quality = 100, bg = "white", res = 200)
-aoi_map3
-dev.off()
-
-map3 <- readJPEG('map3.jpeg')
-map3_add <- western_point3 + annotation_raster(map3, ymin = -0.22,ymax= -0.13,xmin = 4.5,xmax = 8.5)
-
-setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures")
-jpeg(filename = "shapley.jpeg", width = 2500, height = 3500,
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures/Revised_figures")
+jpeg(filename = "costa.jpeg", width = 800, height = 800,
      pointsize = 12, quality = 100, bg = "white", res = 300)
-ggarrange(exist_pop2, map2_add, map3_add, nrow = 3, ncol = 1)
+costa_map
+dev.off()
+
+
+## add map existing
+library(jpeg)
+costa_map <- readJPEG('costa.jpeg')
+costa2 <- costa + annotation_raster(costa_map, ymin = -0.2,ymax= -0.075, xmin = 5,xmax = 11.1)
+costa2
+
+amazon_map <- ggplot(aoi) +
+  theme_few(17)+
+  geom_sf()+
+  geom_sf_text(data = props_sf[3,], size = 7, aes(label = "x"), colour = "red")+
+  xlab("")+
+  ylab("")+
+  theme(axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank(), #remove x axis ticks
+        axis.text.y=element_blank(),  #remove y axis labels
+        axis.ticks.y=element_blank(),  #remove y axis ticks
+        panel.border = element_blank()
+  )
+amazon_map
+
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures/Revised_figures")
+jpeg(filename = "amazon.jpeg", width = 800, height = 800,
+     pointsize = 12, quality = 100, bg = "white", res = 300)
+amazon_map
+dev.off()
+
+
+## add map existing
+library(jpeg)
+amazon_map <- readJPEG('amazon.jpeg')
+amazon2 <- amazon + annotation_raster(amazon_map, ymin = -0.2,ymax= -0.075, xmin = 5,xmax = 11.1)
+amazon2
+
+atlantic_map <- ggplot(aoi) +
+  theme_few(17)+
+  geom_sf()+
+  geom_sf_text(data = props_sf[4,], size = 7, aes(label = "x"), colour = "red")+
+  xlab("")+
+  ylab("")+
+  theme(axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank(), #remove x axis ticks
+        axis.text.y=element_blank(),  #remove y axis labels
+        axis.ticks.y=element_blank(),  #remove y axis ticks
+        panel.border = element_blank()
+  )
+atlantic_map
+
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures/Revised_figures")
+jpeg(filename = "atlantic.jpeg", width = 800, height = 800,
+     pointsize = 12, quality = 100, bg = "white", res = 300)
+atlantic_map
+dev.off()
+
+
+## add map existing
+library(jpeg)
+atlantic_map <- readJPEG('atlantic.jpeg')
+atlantic2 <- atlantic + annotation_raster(atlantic_map, ymin = -0.2,ymax= -0.075, xmin = 5,xmax = 11.1)
+atlantic2
+
+
+setwd("C:/Users/slehnen/OneDrive - DOI/Ocelot_collab/Figures/Revised_figures")
+jpeg(filename = "Figure_9_shapley.jpeg", width = 3200, height = 5500,
+     pointsize = 12, quality = 100, bg = "white", res = 300)
+ggarrange(mexico2, costa2, amazon2, atlantic2, nrow = 4, ncol = 1)
 dev.off()
 
